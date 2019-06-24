@@ -3,6 +3,10 @@ import random
 import bmesh
 from bpy import ops, context
 
+#questions:
+#how does the bisection algorithm work
+#how does the face fill algorithm work
+
 def dump(obj, leva=0):
 	for attr in dir(obj):
 		if hasattr( obj, "attr" ):
@@ -41,19 +45,23 @@ def run():
 	bm = bmesh.new()
 	bm.from_mesh(me)
 	#now slice
+	deselect_e(bm)
+	deselect_v(bm)
+	deselect_f(bm)
 	slice(bm)
 	#now run updates
 	bm.to_mesh(me)
 	me.update()
 	bpy.context.scene.update()
 	#assumes that all the edges have been selected
-	#add in the slices on each edge selection
+	#add in the slices on each edge selection, may have to do this one by one
 	bpy.ops.object.mode_set(mode = 'EDIT')
-	bpy.ops.mesh.edge_face_add()
+	#bpy.ops.mesh.remove_doubles(threshold=.001) #smaller than divisions
+	bm.free()
 
 def slice(bm):
 	xmin, xmax = measure(bm)
-	numslices = 50
+	numslices = 4
 	step = (xmax - xmin) / float(numslices)
 	for i in range(numslices):
 		z = step * i + xmin
@@ -69,40 +77,105 @@ def slice_in_edge(bm, i):
 	geom = []
 	geom.extend(edges)
 	geom.extend(faces)
-	#save floats where the vertex z locations should be, hardcoded for now
-	offset = 1.0/100.0
-	target_up = i
-	target_del = i + offset
-	target_down = i + 2 * offset
+	offset = .001
+	mid_offset = .01
+	#first cut group
+	target_down1 = i
+	target_down2 = target_down1 + offset
+	target_down3 = target_down2 + offset
+	target_down4 = target_down3 + offset
+	#mi
+	target_mid = target_down4 + mid_offset
+	#second group
+	target_up1 = target_mid + mid_offset
+	target_up2 = target_up1 + offset
+	target_up3 = target_up2 + offset
+	target_up4 = target_up3 + offset
+	#first three
 	result = bmesh.ops.bisect_plane(bm,
 		dist=0.0000001, 
 		geom=geom,
-		plane_co=(0, 0, target_down),
+		plane_co=(0, 0, target_down1),
 		plane_no=(0, 0, 1),
 	)
 	geom = result['geom']
 	result = bmesh.ops.bisect_plane(bm,
 		dist=0.0000001, 
 		geom=geom,
-		plane_co=(0, 0, target_del),
+		plane_co=(0, 0, target_down2),
 		plane_no=(0, 0, 1),
 	)
 	geom = result['geom']
 	result = bmesh.ops.bisect_plane(bm,
 		dist=0.0000001, 
 		geom=geom,
-		plane_co=(0, 0, target_up),
+		plane_co=(0, 0, target_down3),
+		plane_no=(0, 0, 1),
+	)
+	geom = result['geom']
+	result = bmesh.ops.bisect_plane(bm,
+		dist=0.0000001, 
+		geom=geom,
+		plane_co=(0, 0, target_down4),
+		plane_no=(0, 0, 1),
+	)
+	geom = result['geom']
+	result = bmesh.ops.bisect_plane(bm,
+		dist=0.0000001, 
+		geom=geom,
+		plane_co=(0, 0, target_mid),
+		plane_no=(0, 0, 1),
+	)
+	geom = result['geom']
+	result = bmesh.ops.bisect_plane(bm,
+		dist=0.0000001, 
+		geom=geom,
+		plane_co=(0, 0, target_up1),
+		plane_no=(0, 0, 1),
+	)
+	geom = result['geom']
+	result = bmesh.ops.bisect_plane(bm,
+		dist=0.0000001, 
+		geom=geom,
+		plane_co=(0, 0, target_up2),
+		plane_no=(0, 0, 1),
+	)
+	geom = result['geom']
+	result = bmesh.ops.bisect_plane(bm,
+		dist=0.0000001, 
+		geom=geom,
+		plane_co=(0, 0, target_up3),
+		plane_no=(0, 0, 1),
+	)
+	geom = result['geom']
+	result = bmesh.ops.bisect_plane(bm,
+		dist=0.0000001, 
+		geom=geom,
+		plane_co=(0, 0, target_up4),
 		plane_no=(0, 0, 1),
 	)
 	geom = result['geom']
 	#cuts, now deselect
 	bm.verts.ensure_lookup_table()
+	#remove other cuts
 	for v in bm.verts:
-		if math.isclose(v.co.z, target_del, abs_tol=.0000001): #if on a high edge
+		if math.isclose(v.co.z, target_up1, abs_tol=.0000001) or math.isclose(v.co.z, target_up3, abs_tol=.0000001) or math.isclose(v.co.z, target_down2, abs_tol=.0000001) or math.isclose(v.co.z, target_down4, abs_tol=.0000001) or math.isclose(v.co.z, target_mid, abs_tol=.00001):
 			bm.verts.remove(v)
-	for v in bm.verts:
-		if math.isclose(v.co.z, target_up, abs_tol=.0000001): #if on a high edge
-			v.select = True
-	for v in bm.verts:
-		if math.isclose(v.co.z, target_down, abs_tol=.0000001): #if on a high edge
-			v.select = True
+	bm.edges.ensure_lookup_table()
+	to_fill = []
+	for e in bm.edges:
+		v1 = e.verts[0]
+		v2 = e.verts[1]
+		if math.isclose(v1.co.z, target_down3, abs_tol=.00001) and math.isclose(v2.co.z, target_down3, abs_tol=.00001): #if on a high edge
+			to_fill.append(e)
+			e.select = True
+	bmesh.ops.holes_fill(bm, edges=to_fill)
+	#bottom part:
+	to_fill = []
+	for e in bm.edges:
+		v1 = e.verts[0]
+		v2 = e.verts[1]
+		if math.isclose(v1.co.z, target_up2, abs_tol=.00001) and math.isclose(v2.co.z, target_up2, abs_tol=.00001): #if on a high edge
+			to_fill.append(e)
+			e.select = True
+	bmesh.ops.holes_fill(bm, edges=to_fill)
